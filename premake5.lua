@@ -16,7 +16,8 @@ workspace "MHWSF"
 project "MHWSF"
 	kind "SharedLib"
 	language "C++"
-	targetdir "bin/%{cfg.buildcfg}"
+	targetdir "bin/"
+	targetname "Manhunt.WidescreenFix"
 	targetextension ".asi"
 	characterset ("MBCS")
 
