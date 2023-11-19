@@ -175,17 +175,17 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 class CConfig
 {
-	static char m_szPath[MAX_PATH];
+	static wchar_t m_szPath[MAX_PATH];
 
-	static int GetInt(char *section, char *key, int defaultValue)
+	static int GetInt(wchar_t *section, wchar_t *key, int defaultValue)
 	{
-		return GetPrivateProfileInt(section,  key, defaultValue, m_szPath);
+		return GetPrivateProfileIntW(section,  key, defaultValue, m_szPath);
 	}
-	static void SetInt(char *section, char *key, int value)
+	static void SetInt(wchar_t *section, wchar_t *key, int value)
 	{
-		char temp[32];
-		_snprintf_s(temp, sizeof(temp), "%d", value);
-		WritePrivateProfileString(section, key, temp, m_szPath);
+		wchar_t temp[32];
+		swprintf_s(temp, sizeof(temp), L"%d", value);
+		WritePrivateProfileStringW(section, key, temp, m_szPath);
 	}
 public:
 
@@ -197,30 +197,30 @@ public:
 
 	static void Read()
 	{
-		GetModuleFileName((HINSTANCE)&__ImageBase, m_szPath, MAX_PATH);
-		PathRenameExtension(m_szPath, ".ini");
+		GetModuleFileNameW((HINSTANCE)&__ImageBase, m_szPath, MAX_PATH);
+		PathRenameExtensionW(m_szPath, L".ini");
 
-		bWideScreen                      = GetInt  ("Main", "bWideScreen", bWideScreen != 0) != 0;
-		bPS2Subs                         = GetInt  ("Main", "bPS2Subs", bPS2Subs != 0) != 0;
-		bXboxHud                         = GetInt  ("Main", "bXboxHud", bXboxHud != 0) != 0;
-		bLockedCursor                    = GetInt  ("Main", "bLockedCursor", bLockedCursor != 0) != 0;
-		bForceEquilateralLockOnCrosshair = GetInt  ("Main", "bForceEquilateralLockOnCrosshair", bForceEquilateralLockOnCrosshair != 0) !=0;
+		bWideScreen                      = GetInt  (L"Main", L"bWideScreen", bWideScreen != 0) != 0;
+		bPS2Subs                         = GetInt  (L"Main", L"bPS2Subs", bPS2Subs != 0) != 0;
+		bXboxHud                         = GetInt  (L"Main", L"bXboxHud", bXboxHud != 0) != 0;
+		bLockedCursor                    = GetInt  (L"Main", L"bLockedCursor", bLockedCursor != 0) != 0;
+		bForceEquilateralLockOnCrosshair = GetInt  (L"Main", L"bForceEquilateralLockOnCrosshair", bForceEquilateralLockOnCrosshair != 0) !=0;
 	}
 
 	static void Write()
 	{
-		GetModuleFileName((HINSTANCE)&__ImageBase, m_szPath, MAX_PATH);
-		PathRenameExtension(m_szPath, ".ini");
+		GetModuleFileNameW((HINSTANCE)&__ImageBase, m_szPath, MAX_PATH);
+		PathRenameExtensionW(m_szPath, L".ini");
 
-		SetInt  ("Main", "bWideScreen", bWideScreen != 0);
-		SetInt  ("Main", "bPS2Subs", bPS2Subs != 0);
-		SetInt  ("Main", "bXboxHud", bXboxHud != 0);
-		SetInt  ("Main", "bLockedCursor", bLockedCursor != 0);
-		//SetInt  ("Main", "bForceEquilateralLockOnCrosshair", bForceEquilateralLockOnCrosshair != 0);
+		SetInt  (L"Main", L"bWideScreen", bWideScreen != 0);
+		SetInt  (L"Main", L"bPS2Subs", bPS2Subs != 0);
+		SetInt  (L"Main", L"bXboxHud", bXboxHud != 0);
+		SetInt  (L"Main", L"bLockedCursor", bLockedCursor != 0);
+		//SetInt  (L"Main", L"bForceEquilateralLockOnCrosshair", bForceEquilateralLockOnCrosshair != 0);
 	}
 };
 
-char  CConfig::m_szPath[MAX_PATH];
+wchar_t CConfig::m_szPath[MAX_PATH];
 
 int   CConfig::bWideScreen = 1;
 int   CConfig::bPS2Subs = 0;
@@ -1719,328 +1719,367 @@ void __declspec(naked) patch_CPCLoadSave__SaveSettings()
 	}
 }
 
+#if (__cplusplus >= 202101L)
+extern "C" __declspec(dllexport) void InitializeASI()
+#else
+void InitializeASI()
+#endif
+{
+	static bool bPatched = false;
+	
+	if (bPatched)
+		return;
+	
+    bPatched = true;
+	
+	CConfig::Read();
+
+	static float fOne = 1.0f;
+
+	if ( CConfig::bLockedCursor )
+		CPatch::SetChar(0x4C184A, 0x75); // jz -> jnz
+
+	CCamera::m_aspectRatio = DEFAULT_ASPECT_RATIO;
+
+	CPatch::Nop(0x475BF5, 0x475C09-0x475BF5);
+	CPatch::RedirectCall(0x475BF5, SetViewWindowOriginal);
+	CPatch::RedirectJump(0x476A80, SetViewWindowDefault);
+	CPatch::RedirectJump(0x476AA0, SetViewWindowWidescreen);
+
+	CPatch::Nop(0x5E2536, 0x5E2540-0x5E2536);
+	CPatch::RedirectCall(0x5E2536, patch_Initialise);
+
+	CPatch::RedirectJump(0x604F20, SCGetAspectRatio);
+
+	CPatch::RedirectJump(0x60625A, patch_CPCLoadSave__SaveSettings);
+
+	// 2d
+	CPatch::RedirectJump(0x5F8AA2, patch_DrawQuad2dSet);
+	CPatch::RedirectJump(0x5F93C2, patch_DrawQuad2dSetAll);
+
+	// BinkFrame
+	// take resolution from bink file
+	unsigned char push_width_ebx[]  =  { 0xFF, 0x73, 0x00 };   // push    dword ptr [ebx+0]
+	unsigned char push_height_ebx[] =  { 0xFF, 0x73, 0x04 };   // push    dword ptr [ebx+4]
+	unsigned char push_width_ebp[]  =  { 0xFF, 0x75, 0x00 };   // push    dword ptr [ebp+0]
+	unsigned char push_height_ebp[] =  { 0xFF, 0x75, 0x04 };   // push    dword ptr [ebp+4]
+	CPatch::Nop(0x4C0D2F, 5);
+	CPatch::Set(0x4C0D2F, push_width_ebx, sizeof(push_width_ebx));
+	CPatch::Nop(0x4C0D2A, 5);
+	CPatch::Set(0x4C0D2A, push_height_ebx, sizeof(push_height_ebx));
+	CPatch::Nop(0x4C0ECA, 5);
+	CPatch::Set(0x4C0ECA, push_width_ebp, sizeof(push_width_ebp));
+	CPatch::Nop(0x4C0EC5, 5);
+	CPatch::Set(0x4C0EC5, push_height_ebp, sizeof(push_height_ebp));
+	CPatch::Nop(0x4C0ED7, 5);
+	CPatch::Set(0x4C0ED7, push_height_ebp, sizeof(push_height_ebp));
+	//
+	CPatch::RedirectCall(0x4C0F31, CRenderer_DrawQuad2d_Menu_Black);
+	CPatch::RedirectJump(0x60FB14, patch_DrawSubtitles);
+
+	// __DrawTapeInfo
+	CPatch::SetPointer(0x58DE85 + 2, &_fTITextY);
+	CPatch::SetPointer(0x58DECF + 2, &_fTITextY);
+	CPatch::SetPointer(0x58DF08 + 2, &_fTITextY);
+	CPatch::SetPointer(0x58DF47 + 2, &_fTITextY);
+
+	CPatch::SetPointer(0x58E08B + 2, &_fRecTextX);
+	CPatch::SetPointer(0x58DE47 + 2, &_TCRW2);
+	CPatch::Nop(0x58DED8, 0x58DEDE-0x58DED8);
+	CPatch::RedirectCall(0x58DED8, patch___DrawTapeInfo_1);
+	CPatch::Nop(0x58DF0E, 0x58DF14-0x58DF0E);
+	CPatch::RedirectCall(0x58DF0E, patch___DrawTapeInfo_1);
+	CPatch::Nop(0x58DF4D, 0x58DF53-0x58DF4D);
+	CPatch::RedirectCall(0x58DF4D, patch___DrawTapeInfo_1);
+	CPatch::Nop(0x58DF5C, 0x58DF62-0x58DF5C);
+	CPatch::RedirectCall(0x58DF5C, patch___DrawTapeInfo_2);
+	CPatch::Nop(0x58DF21, 0x58DF27-0x58DF21);
+	CPatch::RedirectCall(0x58DF21, patch___DrawTapeInfo_3);
+	CPatch::Nop(0x58E93B, 0x58E941-0x58E93B);
+	CPatch::RedirectCall(0x58E93B, patch___DrawTapeInfo_4);
+	CPatch::Nop(0x58E94F, 0x58E955-0x58E94F);
+	CPatch::RedirectCall(0x58E94F, patch___DrawTapeInfo_4);
+	CPatch::RedirectCall(0x58E88C, patch___DrawTapeInfo_5);
+	CPatch::RedirectJump(0x58E839, patch___DrawTapeInfo_6);
+	CPatch::RedirectJump(0x58EA5F, patch___DrawTapeInfo_7);
+
+	// DrawCameraCounter
+	CPatch::Nop(0x5D575F, 0x5D5767-0x5D575F);
+	CPatch::RedirectCall(0x5D575F, patch_DrawCameraCounter_1);
+	CPatch::Nop(0x5D57F3, 0x5D5802-0x5D57F3);
+	CPatch::RedirectCall(0x5D57F3, patch_DrawCameraCounter_2);
+
+	// CFrontend::DrawVideoFX
+	CPatch::SetPointer(0x5F7B0C + 2, &fOne);
+	CPatch::SetPointer(0x5F7D1B + 2, &fOne);
+	CPatch::SetPointer(0x5F7D11 + 2, &fVideoFxTC2Min);
+	CPatch::SetPointer(0x5F7D0B + 2, &fVideoFxTC2MaxMinusMin);
+	CPatch::SetPointer(0x5F7A75 + 2, &fVideoFxSizeHalf);
+	CPatch::SetPointer(0x5F7C58 + 2, &fVideoFxSizeHalf);
+	CPatch::SetPointer(0x5F7E4A + 2, &fVideoFxSizeHalf);
+
+	// RenderFuzz
+	CPatch::SetPointer(0x592456 + 2, &fFuzzStepX);
+	CPatch::Nop(0x592417, 0x59241D-0x592417);
+	CPatch::RedirectCall(0x592417, patch_RenderFuzz);
+
+	// Scanlines
+	CPatch::RedirectJump(0x5FA6F0, CRenderer_DrawRasterLineFX);
+
+	// CBloodDropManager::BloodFire
+	CPatch::Nop(0x592CFA, 0x592D00-0x592CFA);
+	CPatch::RedirectCall(0x592CFA, patch_BloodFire1);
+	CPatch::Nop(0x592DBE, 0x592DC4-0x592DBE);
+	CPatch::RedirectCall(0x592DBE, patch_BloodFire2);
+	CPatch::Nop(0x593023, 0x59302B-0x593023);
+	CPatch::RedirectCall(0x593023, patch_BloodFire3);
+
+	// FX
+	CPatch::Nop(0x5F3A6A, 0x5F3A72-0x5F3A6A);
+	CPatch::RedirectCall(0x5F3A6A, patch_FXNightvision_1);
+	CPatch::Nop(0x5F3AAA, 0x5F3ABA-0x5F3AAA);
+	CPatch::RedirectCall(0x5F3AAA, patch_FXNightvision_2);
+	CPatch::Nop(0x5F41B0, 0x5F41B8-0x5F41B0);
+	CPatch::RedirectCall(0x5F41B0, patch_FXArtFilter_1);
+	CPatch::Nop(0x5F41EC, 0x5F41FC-0x5F41EC);
+	CPatch::RedirectCall(0x5F41EC, patch_FXArtFilter_2);
+	CPatch::Nop(0x5F450F, 0x5F4517-0x5F450F);
+	CPatch::RedirectCall(0x5F450F, patch_FXDrug_1);
+	CPatch::Nop(0x5F454F, 0x5F455F-0x5F454F);
+	CPatch::RedirectCall(0x5F454F, patch_FXDrug_2);
+	CPatch::Nop(0x5F4980, 0x5F4987-0x5F4980);
+	CPatch::RedirectCall(0x5F4980, patch_FXHit1_1);
+	CPatch::Nop(0x5F49A9, 0x5F49B9-0x5F49A9);
+	CPatch::RedirectCall(0x5F49A9, patch_FXHit1_2);
+	CPatch::Nop(0x5F5067, 0x5F5072-0x5F5067);
+	CPatch::RedirectCall(0x5F5067, patch_FXHit2_1);
+	CPatch::Nop(0x5F5090, 0x5F50A0-0x5F5090);
+	CPatch::RedirectCall(0x5F5090, patch_FXHit2_2);
+	CPatch::SetChar(0x5F54C2 + 3, 0x2C);	// var_88 -> var_F8
+	CPatch::SetChar(0x5F5577 + 3, 0x2C);	// var_88 -> var_F8
+	CPatch::Nop(0x5F5484, 0x5F548A-0x5F5484);
+	CPatch::RedirectCall(0x5F5484, patch_FXHit3);
+	CPatch::RedirectCall(0x5F567C, CRenderer_DrawTri2d_FixNoFX);
+
+	// CLightFx, fleshlight
+	CPatch::SetPointer(0x59C005 + 2, &fOne);
+	CPatch::Nop(0x59C7CF, 0x59C7D9-0x59C7CF);
+	CPatch::RedirectCall(0x59C7CF, patch_CLightFX_Render);
+
+	// CTextOverlay
+	if ( CConfig::bXboxHud )
+	{
+		_fOverlayX = 0.075f;
+		_fOverlayY = 0.075f;
+	}
+
+	CPatch::Nop(0x48AA44, 0x48AA4B-0x48AA44);
+	CPatch::RedirectCall(0x48AA44, patch_CTextOverlay_Render1);
+	CPatch::Nop(0x48AA8F, 0x48AA96-0x48AA8F);
+	CPatch::RedirectCall(0x48AA8F, patch_CTextOverlay_Render2);
+	CPatch::Nop(0x48AC43, 0x48AC49-0x48AC43);
+	CPatch::RedirectCall(0x48AC43, patch_CTextOverlay_Render3);
+	CPatch::RedirectCall(0x48B0AB, patch_CTextOverlay_SplitAddWord);
+	CPatch::RedirectCall(0x48B1D4, patch_CTextOverlay_CheckTextWidth);
+	CPatch::RedirectCall(0x48B2A4, patch_CTextOverlay_SplitAddWord);
+	CPatch::Nop(0x48B421, 0x48B428-0x48B421);
+	CPatch::RedirectCall(0x48B421, patch_CTextOverlay_RightJustify);
+
+	// console
+	CPatch::SetPointer(0x4BD801 + 2, &fConsoleSCLY);
+	CPatch::SetPointer(0x4BD8A2 + 2, &fConsoleSCLY);
+	CPatch::SetPointer(0x4BD81D + 2, &fConsoleSCLX);
+	CPatch::SetPointer(0x4BD8C8 + 2, &fConsoleSCLX);
+
+	//CFrontend::Render2d
+
+	// dbg
+	CPatch::Nop(0x5EFB3E, 0x5EFB48-0x5EFB3E);
+	CPatch::RedirectCall(0x5EFB3E, patch_Render2d_dbg1);
+	CPatch::Nop(0x5EFC5C, 0x5EFC66-0x5EFC5C);
+	CPatch::RedirectCall(0x5EFC5C, patch_Render2d_dbg2);
+	CPatch::Nop(0x5EFDBF, 0x5EFDC9-0x5EFDBF);
+	CPatch::RedirectCall(0x5EFDBF, patch_Render2d_dbg3);
+	CPatch::Nop(0x5F1A9F, 0x5F1AA9-0x5F1A9F);
+	CPatch::RedirectCall(0x5F1A9F, patch_Render2d_dbg4);
+	CPatch::Nop(0x5F1BCB, 0x5F1BD5-0x5F1BCB);
+	CPatch::RedirectCall(0x5F1BCB, patch_Render2d_dbg5);
+	CPatch::Nop(0x5F1CFE, 0x5F1D08-0x5F1CFE);
+	CPatch::RedirectCall(0x5F1CFE, patch_Render2d_dbg6);
+	CPatch::SetPointer(0x5F1E2B + 2, &fDebugX);
+	CPatch::SetPointer(0x5F1E1F + 2, &fDebugW);
+	CPatch::Nop(0x5F22DF, 0x5F22E9-0x5F22DF);
+	CPatch::RedirectCall(0x5F22DF, patch_Render2d_dbgmenu1);
+	CPatch::Nop(0x5F24C1, 0x5F24CB-0x5F24C1);
+	CPatch::RedirectCall(0x5F24C1, patch_Render2d_dbgmenu2);
+	CPatch::Nop(0x5F25C6, 0x5F25D0-0x5F25C6);
+	CPatch::RedirectCall(0x5F25C6, patch_Render2d_dbgmenu3);
+	CPatch::Nop(0x5F2638, 0x5F2642-0x5F2638);
+	CPatch::RedirectCall(0x5F2638, patch_Render2d_dbgmenu3);
+	CPatch::Nop(0x5F2695, 0x5F269F-0x5F2695);
+	CPatch::RedirectCall(0x5F2695, patch_Render2d_dbgmenu3);
+	CPatch::Nop(0x5F270E, 0x5F2718-0x5F270E);
+	CPatch::RedirectCall(0x5F270E, patch_Render2d_dbgmenu3);
+	CPatch::Nop(0x5F2765, 0x5F276F-0x5F2765);
+	CPatch::RedirectCall(0x5F2765, patch_Render2d_dbgmenu4);
+	CPatch::Nop(0x5F279E, 0x5F27A8-0x5F279E);
+	CPatch::RedirectCall(0x5F279E, patch_Render2d_dbgmenu3);
+
+	// hud
+	CPatch::Nop(0x5F02AE, 0x5F02B9-0x5F02AE);
+	CPatch::RedirectCall(0x5F02AE, patch_Render2d_hudx);
+	CPatch::Nop(0x5F02C8, 0x5F02D3-0x5F02C8);
+	CPatch::RedirectCall(0x5F02C8, patch_Render2d_hudy);
+	CPatch::SetPointer(0x5F0C90 + 2, &fOffX);
+	CPatch::SetPointer(0x5F0E0C + 2, &fOffX);
+
+	// RenderLockOnDisplayForPed
+	CPatch::Nop(0x4AAB67, 0x4AAB6E-0x4AAB67);
+	CPatch::RedirectCall(0x4AAB67, patch_RenderLockOnDisplayForPed);
+
+	// CGameInfo::RenderDamageDirections
+	CPatch::SetPointer(0x5DB814 + 2, &fDamageMidY);
+	CPatch::SetPointer(0x5DBC16 + 2, &fDamageMidY);
+
+	// CGameInventory::InventoryControl
+	CPatch::Nop(0x5DE913, 0x5DE91E-0x5DE913);
+	CPatch::RedirectCall(0x5DE913, patch_InventoryControl);
+	CPatch::SetPointer(0x5DF8F2 + 2, &fInvConOffX);
+	//
+
+	// CFrontend::TimerDraw
+	CPatch::Nop(0x5E7941, 0x5E794C-0x5E7941);
+	CPatch::RedirectCall(0x5E7941, patch_TimerDraw);
+	CPatch::Nop(0x5E7DF6, 0x5E7E01-0x5E7DF6);
+	CPatch::RedirectCall(0x5E7DF6, patch_TimerDraw);
+
+	// CGameMap::UpdateAndRender
+	CPatch::Nop(0x5E0082, 0x5E0096-0x5E0082);
+	CPatch::RedirectCall(0x5E0082, patch_GameMap);
+
+	// CFrontend::TextBoxDraw
+	CPatch::SetPointer(0x5F6E30 + 2, &fTextBoxOffX);
+	CPatch::SetPointer(0x5F7158 + 2, &fTextBoxOffX);
+	CPatch::SetPointer(0x5F7289 + 2, &fTextBoxOffX);
+	CPatch::SetPointer(0x5F72B3 + 2, &fTextBoxOffX);
+	CPatch::SetPointer(0x5F6F79 + 2, &fTextBoxOffX2);
+	CPatch::SetPointer(0x5F6F8F + 2, &fTextBoxOffX2);
+	CPatch::SetPointer(0x5F6FD4 + 2, &fTextBoxOffX2);
+	CPatch::SetPointer(0x5F74EE + 2, &fTextBoxOffX3);
+	CPatch::SetPointer(0x5F76AD + 2, &fTextBoxOffX4);
+
+	// CFrontend::PrintInfoDraw
+	CPatch::Nop(0x5E523A, 0x5E5241-0x5E523A);
+	CPatch::RedirectCall(0x5E523A, patch_PrintInfoDraw_1);
+	CPatch::Nop(0x5E5243, 0x5E524A-0x5E5243);
+	CPatch::RedirectCall(0x5E5243, patch_PrintInfoDraw_2);
+	CPatch::SetPointer(0x5E533E + 2, &fPrintInfoPadSizeX1);
+	CPatch::SetPointer(0x5E53A3 + 2, &fPrintInfoPadSizeX1);
+	CPatch::SetPointer(0x5E532A + 2, &fPrintInfoPadSizeX2);
+	CPatch::SetPointer(0x5E5392 + 2, &fPrintInfoPadSizeX2);
+
+	// CGameInfo::Render
+	CPatch::SetPointer(0x5DC8B3 + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DC980 + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DCA49 + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DCAFD + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DCE71 + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DD011 + 2, &fLevelCompX2);
+	CPatch::SetPointer(0x5DCC32 + 2, &fLevelCompX3);
+
+	// CFrontend::Initialise
+	CPatch::RedirectCall(0x5E2652, CRenderer_DrawQuad2d_Menu_Black);
+	CPatch::RedirectCall(0x5E26DC, CRenderer_DrawQuad2d_Menu_Black);
+
+	// RenderMenu
+	CPatch::RedirectCall(0x5D7471, CRenderer_DrawQuad2d_Menu);
+	CPatch::RedirectCall(0x5D7369, CRenderer_DrawQuad2d_Menu);
+	CPatch::RedirectCall(0x5D7504, CRenderer_DrawQuad2d_Menu);
+	CPatch::RedirectCall(0x5D74A8, CRenderer_DrawQuad2d_Menu);
+
+	// CPeripherals::Render_Standard
+	CPatch::RedirectCall(0x608841, CRenderer_DrawQuad2d_Menu_Black);
+
+	// CGameInfo::DrawBlackBox
+	CPatch::RedirectCall(0x5DDBE4, CRenderer_DrawQuad2d_Menu);
+
+	// CFrontend::LoadProgressTexDictLoad
+	CPatch::SetPointer(0x5EECD9+2, &fMHLogo);
+	CPatch::SetPointer(0x5EF026+2, &fMHLogo);
+	CPatch::Nop(0x5EEDD6, 0x5EEDE0-0x5EEDD6);
+	CPatch::RedirectCall(0x5EEDD6, patch_LoadProgressTexDictLoad);
+	CPatch::Nop(0x5EEF9C, 0x5EEFA6-0x5EEF9C);
+	CPatch::RedirectCall(0x5EEF9C, patch_LoadProgressTexDictLoad);
+	CPatch::RedirectCall(0x5EEBBF, CRenderer_DrawQuad2d_Menu);
+
+	// CFEP_SceneSelection
+	CPatch::Nop(0x601AAF, 0x601AB7-0x601AAF);
+	CPatch::RedirectCall(0x601AAF, patch_CFEP_SceneSelection__Draw);
+	CPatch::Nop(0x601A6D, 0x601A75-0x601A6D);
+	CPatch::RedirectCall(0x601A6D, patch_CFEP_SceneSelection__Draw);
+
+	// CFEP_SettingsAudio
+	CPatch::SetPointer(0x602E86+2, &fAudioX);
+
+	// CFEP_SettingsVideo
+	CPatch::SetPointer(0x5DAA20 + 2, &CConfig::bWideScreen);
+	CPatch::SetPointer(0x5DAA30 + 2, &CConfig::bWideScreen);
+	CPatch::Nop(0x6032C6, 0x6032CE-0x6032C6);
+	CPatch::RedirectCall(0x6032C6, patch_CFEP_SettingsVideo__Update);
+	CPatch::RedirectJump(0x6037E5, patch_CFEP_SettingsVideo__Draw_1);
+	CPatch::RedirectJump(0x603843, patch_CFEP_SettingsVideo__Draw_2);
+
+	// CFEP_BonusFeatures
+	CPatch::Nop(0x60440A, 0x604412-0x60440A);
+	CPatch::RedirectCall(0x60440A, patch_CFEP_BonusFeatures__Draw);
+	CPatch::Nop(0x60444F, 0x604457-0x60444F);
+	CPatch::RedirectCall(0x60444F, patch_CFEP_BonusFeatures__Draw);
+
+	// CFEP_BonusPicture__Draw
+	CPatch::RedirectCall(0x5FE993, CRenderer_DrawQuad2d_Menu_Black);
+
+	// CFEP_RemapCtrl
+	CPatch::SetPointer(0x60AD9C+2, &fRemap5X);
+	CPatch::SetPointer(0x60B962+2, &fRemap9X);
+
+	// CFEP_InGame, CFrontendMenu::LevelGoalsDraw
+	CPatch::SetPointer(0x5D9152+2, &fGoalW);
+
+	// CFrontendMenu, Mouse
+	CPatch::SetPointer(0x5DADB6 + 2, &fOne);
+	CPatch::RedirectJump(0x5DB0B2, patch_CFrontendMenu__MouseDraw);
+	CPatch::Nop(0x5DB02A, 0x5DB030-0x5DB02A);
+	CPatch::RedirectCall(0x5DB02A, patch_CFrontendMenu__MouseUpdate);
+}
+
+#if (__cplusplus >= 202101L)
+#include <stacktrace>
+bool IsUALPresent()
+{
+    for (const auto& entry : std::stacktrace::current())
+	{
+        HMODULE hModule = NULL;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)entry.native_handle(), &hModule))
+		{
+            if (GetProcAddress(hModule, "IsUltimateASILoader") != NULL)
+                return true;
+        }
+    }
+    return false;
+}
+#endif
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 {
 	if(reason == DLL_PROCESS_ATTACH)
 	{
-		CConfig::Read();
+#if (__cplusplus >= 202101L)
+		if (!IsUALPresent())
+			InitializeASI();
+#else
+        InitializeASI();
+#endif
 
-		static float fOne = 1.0f;
-
-		if ( CConfig::bLockedCursor )
-			CPatch::SetChar(0x4C184A, 0x75); // jz -> jnz
-
-		CCamera::m_aspectRatio = DEFAULT_ASPECT_RATIO;
-
-		CPatch::Nop(0x475BF5, 0x475C09-0x475BF5);
-		CPatch::RedirectCall(0x475BF5, SetViewWindowOriginal);
-		CPatch::RedirectJump(0x476A80, SetViewWindowDefault);
-		CPatch::RedirectJump(0x476AA0, SetViewWindowWidescreen);
-
-		CPatch::Nop(0x5E2536, 0x5E2540-0x5E2536);
-		CPatch::RedirectCall(0x5E2536, patch_Initialise);
-
-		CPatch::RedirectJump(0x604F20, SCGetAspectRatio);
-
-		CPatch::RedirectJump(0x60625A, patch_CPCLoadSave__SaveSettings);
-
-		// 2d
-		CPatch::RedirectJump(0x5F8AA2, patch_DrawQuad2dSet);
-		CPatch::RedirectJump(0x5F93C2, patch_DrawQuad2dSetAll);
-
-		// BinkFrame
-		// take resolution from bink file
-		unsigned char push_width_ebx[]  =  { 0xFF, 0x73, 0x00 };   // push    dword ptr [ebx+0]
-		unsigned char push_height_ebx[] =  { 0xFF, 0x73, 0x04 };   // push    dword ptr [ebx+4]
-		unsigned char push_width_ebp[]  =  { 0xFF, 0x75, 0x00 };   // push    dword ptr [ebp+0]
-		unsigned char push_height_ebp[] =  { 0xFF, 0x75, 0x04 };   // push    dword ptr [ebp+4]
-		CPatch::Nop(0x4C0D2F, 5);
-		CPatch::Set(0x4C0D2F, push_width_ebx, sizeof(push_width_ebx));
-		CPatch::Nop(0x4C0D2A, 5);
-		CPatch::Set(0x4C0D2A, push_height_ebx, sizeof(push_height_ebx));
-		CPatch::Nop(0x4C0ECA, 5);
-		CPatch::Set(0x4C0ECA, push_width_ebp, sizeof(push_width_ebp));
-		CPatch::Nop(0x4C0EC5, 5);
-		CPatch::Set(0x4C0EC5, push_height_ebp, sizeof(push_height_ebp));
-		CPatch::Nop(0x4C0ED7, 5);
-		CPatch::Set(0x4C0ED7, push_height_ebp, sizeof(push_height_ebp));
-		//
-		CPatch::RedirectCall(0x4C0F31, CRenderer_DrawQuad2d_Menu_Black);
-		CPatch::RedirectJump(0x60FB14, patch_DrawSubtitles);
-
-		// __DrawTapeInfo
-		CPatch::SetPointer(0x58DE85 + 2, &_fTITextY);
-		CPatch::SetPointer(0x58DECF + 2, &_fTITextY);
-		CPatch::SetPointer(0x58DF08 + 2, &_fTITextY);
-		CPatch::SetPointer(0x58DF47 + 2, &_fTITextY);
-
-		CPatch::SetPointer(0x58E08B + 2, &_fRecTextX);
-		CPatch::SetPointer(0x58DE47 + 2, &_TCRW2);
-		CPatch::Nop(0x58DED8, 0x58DEDE-0x58DED8);
-		CPatch::RedirectCall(0x58DED8, patch___DrawTapeInfo_1);
-		CPatch::Nop(0x58DF0E, 0x58DF14-0x58DF0E);
-		CPatch::RedirectCall(0x58DF0E, patch___DrawTapeInfo_1);
-		CPatch::Nop(0x58DF4D, 0x58DF53-0x58DF4D);
-		CPatch::RedirectCall(0x58DF4D, patch___DrawTapeInfo_1);
-		CPatch::Nop(0x58DF5C, 0x58DF62-0x58DF5C);
-		CPatch::RedirectCall(0x58DF5C, patch___DrawTapeInfo_2);
-		CPatch::Nop(0x58DF21, 0x58DF27-0x58DF21);
-		CPatch::RedirectCall(0x58DF21, patch___DrawTapeInfo_3);
-		CPatch::Nop(0x58E93B, 0x58E941-0x58E93B);
-		CPatch::RedirectCall(0x58E93B, patch___DrawTapeInfo_4);
-		CPatch::Nop(0x58E94F, 0x58E955-0x58E94F);
-		CPatch::RedirectCall(0x58E94F, patch___DrawTapeInfo_4);
-		CPatch::RedirectCall(0x58E88C, patch___DrawTapeInfo_5);
-		CPatch::RedirectJump(0x58E839, patch___DrawTapeInfo_6);
-		CPatch::RedirectJump(0x58EA5F, patch___DrawTapeInfo_7);
-
-		// DrawCameraCounter
-		CPatch::Nop(0x5D575F, 0x5D5767-0x5D575F);
-		CPatch::RedirectCall(0x5D575F, patch_DrawCameraCounter_1);
-		CPatch::Nop(0x5D57F3, 0x5D5802-0x5D57F3);
-		CPatch::RedirectCall(0x5D57F3, patch_DrawCameraCounter_2);
-
-		// CFrontend::DrawVideoFX
-		CPatch::SetPointer(0x5F7B0C + 2, &fOne);
-		CPatch::SetPointer(0x5F7D1B + 2, &fOne);
-		CPatch::SetPointer(0x5F7D11 + 2, &fVideoFxTC2Min);
-		CPatch::SetPointer(0x5F7D0B + 2, &fVideoFxTC2MaxMinusMin);
-		CPatch::SetPointer(0x5F7A75 + 2, &fVideoFxSizeHalf);
-		CPatch::SetPointer(0x5F7C58 + 2, &fVideoFxSizeHalf);
-		CPatch::SetPointer(0x5F7E4A + 2, &fVideoFxSizeHalf);
-
-		// RenderFuzz
-		CPatch::SetPointer(0x592456 + 2, &fFuzzStepX);
-		CPatch::Nop(0x592417, 0x59241D-0x592417);
-		CPatch::RedirectCall(0x592417, patch_RenderFuzz);
-
-		// Scanlines
-		CPatch::RedirectJump(0x5FA6F0, CRenderer_DrawRasterLineFX);
-
-		// CBloodDropManager::BloodFire
-		CPatch::Nop(0x592CFA, 0x592D00-0x592CFA);
-		CPatch::RedirectCall(0x592CFA, patch_BloodFire1);
-		CPatch::Nop(0x592DBE, 0x592DC4-0x592DBE);
-		CPatch::RedirectCall(0x592DBE, patch_BloodFire2);
-		CPatch::Nop(0x593023, 0x59302B-0x593023);
-		CPatch::RedirectCall(0x593023, patch_BloodFire3);
-
-		// FX
-		CPatch::Nop(0x5F3A6A, 0x5F3A72-0x5F3A6A);
-		CPatch::RedirectCall(0x5F3A6A, patch_FXNightvision_1);
-		CPatch::Nop(0x5F3AAA, 0x5F3ABA-0x5F3AAA);
-		CPatch::RedirectCall(0x5F3AAA, patch_FXNightvision_2);
-		CPatch::Nop(0x5F41B0, 0x5F41B8-0x5F41B0);
-		CPatch::RedirectCall(0x5F41B0, patch_FXArtFilter_1);
-		CPatch::Nop(0x5F41EC, 0x5F41FC-0x5F41EC);
-		CPatch::RedirectCall(0x5F41EC, patch_FXArtFilter_2);
-		CPatch::Nop(0x5F450F, 0x5F4517-0x5F450F);
-		CPatch::RedirectCall(0x5F450F, patch_FXDrug_1);
-		CPatch::Nop(0x5F454F, 0x5F455F-0x5F454F);
-		CPatch::RedirectCall(0x5F454F, patch_FXDrug_2);
-		CPatch::Nop(0x5F4980, 0x5F4987-0x5F4980);
-		CPatch::RedirectCall(0x5F4980, patch_FXHit1_1);
-		CPatch::Nop(0x5F49A9, 0x5F49B9-0x5F49A9);
-		CPatch::RedirectCall(0x5F49A9, patch_FXHit1_2);
-		CPatch::Nop(0x5F5067, 0x5F5072-0x5F5067);
-		CPatch::RedirectCall(0x5F5067, patch_FXHit2_1);
-		CPatch::Nop(0x5F5090, 0x5F50A0-0x5F5090);
-		CPatch::RedirectCall(0x5F5090, patch_FXHit2_2);
-		CPatch::SetChar(0x5F54C2 + 3, 0x2C);	// var_88 -> var_F8
-		CPatch::SetChar(0x5F5577 + 3, 0x2C);	// var_88 -> var_F8
-		CPatch::Nop(0x5F5484, 0x5F548A-0x5F5484);
-		CPatch::RedirectCall(0x5F5484, patch_FXHit3);
-		CPatch::RedirectCall(0x5F567C, CRenderer_DrawTri2d_FixNoFX);
-
-		// CLightFx, fleshlight
-		CPatch::SetPointer(0x59C005 + 2, &fOne);
-		CPatch::Nop(0x59C7CF, 0x59C7D9-0x59C7CF);
-		CPatch::RedirectCall(0x59C7CF, patch_CLightFX_Render);
-
-		// CTextOverlay
-		if ( CConfig::bXboxHud )
-		{
-			_fOverlayX = 0.075f;
-			_fOverlayY = 0.075f;
-		}
-
-		CPatch::Nop(0x48AA44, 0x48AA4B-0x48AA44);
-		CPatch::RedirectCall(0x48AA44, patch_CTextOverlay_Render1);
-		CPatch::Nop(0x48AA8F, 0x48AA96-0x48AA8F);
-		CPatch::RedirectCall(0x48AA8F, patch_CTextOverlay_Render2);
-		CPatch::Nop(0x48AC43, 0x48AC49-0x48AC43);
-		CPatch::RedirectCall(0x48AC43, patch_CTextOverlay_Render3);
-		CPatch::RedirectCall(0x48B0AB, patch_CTextOverlay_SplitAddWord);
-		CPatch::RedirectCall(0x48B1D4, patch_CTextOverlay_CheckTextWidth);
-		CPatch::RedirectCall(0x48B2A4, patch_CTextOverlay_SplitAddWord);
-		CPatch::Nop(0x48B421, 0x48B428-0x48B421);
-		CPatch::RedirectCall(0x48B421, patch_CTextOverlay_RightJustify);
-
-		// console
-		CPatch::SetPointer(0x4BD801 + 2, &fConsoleSCLY);
-		CPatch::SetPointer(0x4BD8A2 + 2, &fConsoleSCLY);
-		CPatch::SetPointer(0x4BD81D + 2, &fConsoleSCLX);
-		CPatch::SetPointer(0x4BD8C8 + 2, &fConsoleSCLX);
-
-		//CFrontend::Render2d
-
-		// dbg
-		CPatch::Nop(0x5EFB3E, 0x5EFB48-0x5EFB3E);
-		CPatch::RedirectCall(0x5EFB3E, patch_Render2d_dbg1);
-		CPatch::Nop(0x5EFC5C, 0x5EFC66-0x5EFC5C);
-		CPatch::RedirectCall(0x5EFC5C, patch_Render2d_dbg2);
-		CPatch::Nop(0x5EFDBF, 0x5EFDC9-0x5EFDBF);
-		CPatch::RedirectCall(0x5EFDBF, patch_Render2d_dbg3);
-		CPatch::Nop(0x5F1A9F, 0x5F1AA9-0x5F1A9F);
-		CPatch::RedirectCall(0x5F1A9F, patch_Render2d_dbg4);
-		CPatch::Nop(0x5F1BCB, 0x5F1BD5-0x5F1BCB);
-		CPatch::RedirectCall(0x5F1BCB, patch_Render2d_dbg5);
-		CPatch::Nop(0x5F1CFE, 0x5F1D08-0x5F1CFE);
-		CPatch::RedirectCall(0x5F1CFE, patch_Render2d_dbg6);
-		CPatch::SetPointer(0x5F1E2B + 2, &fDebugX);
-		CPatch::SetPointer(0x5F1E1F + 2, &fDebugW);
-		CPatch::Nop(0x5F22DF, 0x5F22E9-0x5F22DF);
-		CPatch::RedirectCall(0x5F22DF, patch_Render2d_dbgmenu1);
-		CPatch::Nop(0x5F24C1, 0x5F24CB-0x5F24C1);
-		CPatch::RedirectCall(0x5F24C1, patch_Render2d_dbgmenu2);
-		CPatch::Nop(0x5F25C6, 0x5F25D0-0x5F25C6);
-		CPatch::RedirectCall(0x5F25C6, patch_Render2d_dbgmenu3);
-		CPatch::Nop(0x5F2638, 0x5F2642-0x5F2638);
-		CPatch::RedirectCall(0x5F2638, patch_Render2d_dbgmenu3);
-		CPatch::Nop(0x5F2695, 0x5F269F-0x5F2695);
-		CPatch::RedirectCall(0x5F2695, patch_Render2d_dbgmenu3);
-		CPatch::Nop(0x5F270E, 0x5F2718-0x5F270E);
-		CPatch::RedirectCall(0x5F270E, patch_Render2d_dbgmenu3);
-		CPatch::Nop(0x5F2765, 0x5F276F-0x5F2765);
-		CPatch::RedirectCall(0x5F2765, patch_Render2d_dbgmenu4);
-		CPatch::Nop(0x5F279E, 0x5F27A8-0x5F279E);
-		CPatch::RedirectCall(0x5F279E, patch_Render2d_dbgmenu3);
-
-		// hud
-		CPatch::Nop(0x5F02AE, 0x5F02B9-0x5F02AE);
-		CPatch::RedirectCall(0x5F02AE, patch_Render2d_hudx);
-		CPatch::Nop(0x5F02C8, 0x5F02D3-0x5F02C8);
-		CPatch::RedirectCall(0x5F02C8, patch_Render2d_hudy);
-		CPatch::SetPointer(0x5F0C90 + 2, &fOffX);
-		CPatch::SetPointer(0x5F0E0C + 2, &fOffX);
-
-		// RenderLockOnDisplayForPed
-		CPatch::Nop(0x4AAB67, 0x4AAB6E-0x4AAB67);
-		CPatch::RedirectCall(0x4AAB67, patch_RenderLockOnDisplayForPed);
-
-		// CGameInfo::RenderDamageDirections
-		CPatch::SetPointer(0x5DB814 + 2, &fDamageMidY);
-		CPatch::SetPointer(0x5DBC16 + 2, &fDamageMidY);
-
-		// CGameInventory::InventoryControl
-		CPatch::Nop(0x5DE913, 0x5DE91E-0x5DE913);
-		CPatch::RedirectCall(0x5DE913, patch_InventoryControl);
-		CPatch::SetPointer(0x5DF8F2 + 2, &fInvConOffX);
-		//
-
-		// CFrontend::TimerDraw
-		CPatch::Nop(0x5E7941, 0x5E794C-0x5E7941);
-		CPatch::RedirectCall(0x5E7941, patch_TimerDraw);
-		CPatch::Nop(0x5E7DF6, 0x5E7E01-0x5E7DF6);
-		CPatch::RedirectCall(0x5E7DF6, patch_TimerDraw);
-
-		// CGameMap::UpdateAndRender
-		CPatch::Nop(0x5E0082, 0x5E0096-0x5E0082);
-		CPatch::RedirectCall(0x5E0082, patch_GameMap);
-
-		// CFrontend::TextBoxDraw
-		CPatch::SetPointer(0x5F6E30 + 2, &fTextBoxOffX);
-		CPatch::SetPointer(0x5F7158 + 2, &fTextBoxOffX);
-		CPatch::SetPointer(0x5F7289 + 2, &fTextBoxOffX);
-		CPatch::SetPointer(0x5F72B3 + 2, &fTextBoxOffX);
-		CPatch::SetPointer(0x5F6F79 + 2, &fTextBoxOffX2);
-		CPatch::SetPointer(0x5F6F8F + 2, &fTextBoxOffX2);
-		CPatch::SetPointer(0x5F6FD4 + 2, &fTextBoxOffX2);
-		CPatch::SetPointer(0x5F74EE + 2, &fTextBoxOffX3);
-		CPatch::SetPointer(0x5F76AD + 2, &fTextBoxOffX4);
-
-		// CFrontend::PrintInfoDraw
-		CPatch::Nop(0x5E523A, 0x5E5241-0x5E523A);
-		CPatch::RedirectCall(0x5E523A, patch_PrintInfoDraw_1);
-		CPatch::Nop(0x5E5243, 0x5E524A-0x5E5243);
-		CPatch::RedirectCall(0x5E5243, patch_PrintInfoDraw_2);
-		CPatch::SetPointer(0x5E533E + 2, &fPrintInfoPadSizeX1);
-		CPatch::SetPointer(0x5E53A3 + 2, &fPrintInfoPadSizeX1);
-		CPatch::SetPointer(0x5E532A + 2, &fPrintInfoPadSizeX2);
-		CPatch::SetPointer(0x5E5392 + 2, &fPrintInfoPadSizeX2);
-
-		// CGameInfo::Render
-		CPatch::SetPointer(0x5DC8B3 + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DC980 + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DCA49 + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DCAFD + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DCE71 + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DD011 + 2, &fLevelCompX2);
-		CPatch::SetPointer(0x5DCC32 + 2, &fLevelCompX3);
-
-		// CFrontend::Initialise
-		CPatch::RedirectCall(0x5E2652, CRenderer_DrawQuad2d_Menu_Black);
-		CPatch::RedirectCall(0x5E26DC, CRenderer_DrawQuad2d_Menu_Black);
-
-		// RenderMenu
-		CPatch::RedirectCall(0x5D7471, CRenderer_DrawQuad2d_Menu);
-		CPatch::RedirectCall(0x5D7369, CRenderer_DrawQuad2d_Menu);
-		CPatch::RedirectCall(0x5D7504, CRenderer_DrawQuad2d_Menu);
-		CPatch::RedirectCall(0x5D74A8, CRenderer_DrawQuad2d_Menu);
-
-		// CPeripherals::Render_Standard
-		CPatch::RedirectCall(0x608841, CRenderer_DrawQuad2d_Menu_Black);
-
-		// CGameInfo::DrawBlackBox
-		CPatch::RedirectCall(0x5DDBE4, CRenderer_DrawQuad2d_Menu);
-
-		// CFrontend::LoadProgressTexDictLoad
-		CPatch::SetPointer(0x5EECD9+2, &fMHLogo);
-		CPatch::SetPointer(0x5EF026+2, &fMHLogo);
-		CPatch::Nop(0x5EEDD6, 0x5EEDE0-0x5EEDD6);
-		CPatch::RedirectCall(0x5EEDD6, patch_LoadProgressTexDictLoad);
-		CPatch::Nop(0x5EEF9C, 0x5EEFA6-0x5EEF9C);
-		CPatch::RedirectCall(0x5EEF9C, patch_LoadProgressTexDictLoad);
-		CPatch::RedirectCall(0x5EEBBF, CRenderer_DrawQuad2d_Menu);
-
-		// CFEP_SceneSelection
-		CPatch::Nop(0x601AAF, 0x601AB7-0x601AAF);
-		CPatch::RedirectCall(0x601AAF, patch_CFEP_SceneSelection__Draw);
-		CPatch::Nop(0x601A6D, 0x601A75-0x601A6D);
-		CPatch::RedirectCall(0x601A6D, patch_CFEP_SceneSelection__Draw);
-
-		// CFEP_SettingsAudio
-		CPatch::SetPointer(0x602E86+2, &fAudioX);
-
-		// CFEP_SettingsVideo
-		CPatch::SetPointer(0x5DAA20 + 2, &CConfig::bWideScreen);
-		CPatch::SetPointer(0x5DAA30 + 2, &CConfig::bWideScreen);
-		CPatch::Nop(0x6032C6, 0x6032CE-0x6032C6);
-		CPatch::RedirectCall(0x6032C6, patch_CFEP_SettingsVideo__Update);
-		CPatch::RedirectJump(0x6037E5, patch_CFEP_SettingsVideo__Draw_1);
-		CPatch::RedirectJump(0x603843, patch_CFEP_SettingsVideo__Draw_2);
-
-		// CFEP_BonusFeatures
-		CPatch::Nop(0x60440A, 0x604412-0x60440A);
-		CPatch::RedirectCall(0x60440A, patch_CFEP_BonusFeatures__Draw);
-		CPatch::Nop(0x60444F, 0x604457-0x60444F);
-		CPatch::RedirectCall(0x60444F, patch_CFEP_BonusFeatures__Draw);
-
-		// CFEP_BonusPicture__Draw
-		CPatch::RedirectCall(0x5FE993, CRenderer_DrawQuad2d_Menu_Black);
-
-		// CFEP_RemapCtrl
-		CPatch::SetPointer(0x60AD9C+2, &fRemap5X);
-		CPatch::SetPointer(0x60B962+2, &fRemap9X);
-
-		// CFEP_InGame, CFrontendMenu::LevelGoalsDraw
-		CPatch::SetPointer(0x5D9152+2, &fGoalW);
-
-		// CFrontendMenu, Mouse
-		CPatch::SetPointer(0x5DADB6 + 2, &fOne);
-		CPatch::RedirectJump(0x5DB0B2, patch_CFrontendMenu__MouseDraw);
-		CPatch::Nop(0x5DB02A, 0x5DB030-0x5DB02A);
-		CPatch::RedirectCall(0x5DB02A, patch_CFrontendMenu__MouseUpdate);
 	}
 
 	return TRUE;

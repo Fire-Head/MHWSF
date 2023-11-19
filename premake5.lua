@@ -19,7 +19,7 @@ project "MHWSF"
 	targetdir "bin/"
 	targetname "Manhunt.WidescreenFix"
 	targetextension ".asi"
-	characterset ("MBCS")
+	buildoptions { "/Zc:strictStrings-" }
 
 	filter "configurations:Release"
 		defines { "NDEBUG" }
