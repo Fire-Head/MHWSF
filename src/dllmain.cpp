@@ -1719,7 +1719,7 @@ void __declspec(naked) patch_CPCLoadSave__SaveSettings()
 	}
 }
 
-#if (__cplusplus >= 202101L)
+#if (__cplusplus >= 202004L)
 extern "C" __declspec(dllexport) void InitializeASI()
 #else
 void InitializeASI()
@@ -2052,7 +2052,7 @@ void InitializeASI()
 	CPatch::RedirectCall(0x5DB02A, patch_CFrontendMenu__MouseUpdate);
 }
 
-#if (__cplusplus >= 202101L)
+#if (__cplusplus >= 202004L)
 #include <stacktrace>
 bool IsUALPresent()
 {
@@ -2073,7 +2073,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 {
 	if(reason == DLL_PROCESS_ATTACH)
 	{
-#if (__cplusplus >= 202101L)
+#if (__cplusplus >= 202004L)
 		if (!IsUALPresent())
 			InitializeASI();
 #else
